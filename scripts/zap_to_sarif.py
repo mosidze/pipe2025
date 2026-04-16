@@ -90,3 +90,7 @@ def main() -> None:
         ],
     }
     Path(args.output).write_text(json.dumps(sarif, indent=2) + "\n")
+
+
+if __name__ == "__main__":
+    main()
