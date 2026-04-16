@@ -1,7 +1,13 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
+
+import yaml
+
+
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
 
 def add_issue(issues: list, issue_id: str, severity: str, file_path: str, title: str, evidence: str, recommendation: str) -> None:
@@ -15,6 +21,44 @@ def add_issue(issues: list, issue_id: str, severity: str, file_path: str, title:
             "recommendation": recommendation,
         }
     )
+
+
+def sanitize_log(text: str, max_lines: int = 200, max_line_len: int = 500) -> str:
+    stripped = ANSI_ESCAPE_RE.sub("", text)
+    lines = stripped.splitlines()
+    sanitized_lines = []
+
+    for line in lines[:max_lines]:
+        if len(line) > max_line_len:
+            sanitized_lines.append(f"{line[:max_line_len]} ...[truncated]")
+        else:
+            sanitized_lines.append(line)
+
+    if len(lines) > max_lines:
+        sanitized_lines.append(f"... [{len(lines) - max_lines} more lines truncated]")
+
+    body = "\n".join(sanitized_lines)
+    return f"<untrusted_runtime_log>\n{body}\n</untrusted_runtime_log>"
+
+
+def normalize_workflow_mapping(parsed: object) -> dict:
+    if not isinstance(parsed, dict):
+        return {}
+    if "on" not in parsed and True in parsed:
+        parsed = dict(parsed)
+        parsed["on"] = parsed[True]
+    return parsed
+
+
+def dockerfile_instruction_tokens(content: str) -> list[tuple[str, str]]:
+    instructions = []
+    for line in content.splitlines():
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        token = stripped.split(None, 1)[0].upper()
+        instructions.append((token, stripped))
+    return instructions
 
 
 def inspect_dockerfile(issues: list, advisory_issues: list) -> None:
@@ -32,9 +76,10 @@ def inspect_dockerfile(issues: list, advisory_issues: list) -> None:
         return
 
     content = dockerfile.read_text()
-    lines = content.splitlines()
+    instructions = dockerfile_instruction_tokens(content)
+    from_lines = [line for token, line in instructions if token == "FROM"]
 
-    if "golang:rc-stretch" in content:
+    if any("golang:rc-stretch" in line.lower() for line in from_lines):
         add_issue(
             advisory_issues,
             "legacy_base_image",
@@ -45,7 +90,7 @@ def inspect_dockerfile(issues: list, advisory_issues: list) -> None:
             "Move to a stable, supported multi-stage build.",
         )
 
-    if sum(1 for line in lines if line.strip().startswith("FROM ")) < 2:
+    if len(from_lines) < 2:
         add_issue(
             advisory_issues,
             "single_stage_build",
@@ -56,7 +101,7 @@ def inspect_dockerfile(issues: list, advisory_issues: list) -> None:
             "Use multi-stage Docker builds to reduce runtime size and attack surface.",
         )
 
-    if "USER " not in content:
+    if not any(token == "USER" for token, _ in instructions):
         add_issue(
             advisory_issues,
             "root_runtime",
@@ -67,7 +112,7 @@ def inspect_dockerfile(issues: list, advisory_issues: list) -> None:
             "Add a dedicated runtime user.",
         )
 
-    if "HEALTHCHECK" not in content:
+    if not any(token == "HEALTHCHECK" for token, _ in instructions):
         add_issue(
             advisory_issues,
             "missing_healthcheck",
@@ -85,6 +130,8 @@ def inspect_compose(issues: list, advisory_issues: list) -> None:
         return
 
     content = compose.read_text()
+    parsed = yaml.safe_load(content) or {}
+    services = parsed.get("services", {}) if isinstance(parsed, dict) else {}
 
     if content.lstrip().startswith("version:"):
         add_issue(
@@ -97,7 +144,12 @@ def inspect_compose(issues: list, advisory_issues: list) -> None:
             "Remove the version field for modern Docker Compose.",
         )
 
-    if "healthcheck:" not in content:
+    has_healthcheck = any(
+        isinstance(service, dict) and "healthcheck" in service
+        for service in services.values()
+    ) if isinstance(services, dict) else False
+
+    if not has_healthcheck:
         add_issue(
             advisory_issues,
             "missing_compose_healthcheck",
@@ -124,8 +176,11 @@ def inspect_workflow(issues: list, advisory_issues: list) -> None:
         return
 
     content = workflow.read_text()
+    parsed = normalize_workflow_mapping(yaml.safe_load(content) or {})
+    on_section = parsed.get("on", {}) if isinstance(parsed, dict) else {}
+    jobs = parsed.get("jobs", {}) if isinstance(parsed, dict) else {}
 
-    if "workflow_dispatch:" not in content:
+    if not isinstance(on_section, dict) or "workflow_dispatch" not in on_section:
         add_issue(
             advisory_issues,
             "manual_trigger_missing",
@@ -136,7 +191,19 @@ def inspect_workflow(issues: list, advisory_issues: list) -> None:
             "Add workflow_dispatch to make the showcase easy to run.",
         )
 
-    if "actions/upload-artifact" not in content:
+    has_upload_artifact = False
+    if isinstance(jobs, dict):
+        for job in jobs.values():
+            if not isinstance(job, dict):
+                continue
+            for step in job.get("steps", []):
+                if isinstance(step, dict) and "upload-artifact" in str(step.get("uses", "")):
+                    has_upload_artifact = True
+                    break
+            if has_upload_artifact:
+                break
+
+    if not has_upload_artifact:
         add_issue(
             advisory_issues,
             "artifact_publishing_missing",
@@ -158,7 +225,7 @@ def inspect_verification(issues: list, verification_path: Path, logs_path: Path)
                 "high",
                 str(verification_path),
                 "Runtime verification failed",
-                verification.get("summary", "Verification failed."),
+                sanitize_log(str(verification.get("summary", "Verification failed."))),
                 "Repair Docker or pipeline configuration so the service can build and answer HTTP checks.",
             )
 
@@ -171,7 +238,7 @@ def inspect_verification(issues: list, verification_path: Path, logs_path: Path)
                 "medium",
                 str(logs_path),
                 "Docker permission issue detected",
-                "Runtime logs mention a Docker permission problem.",
+                sanitize_log(logs),
                 "Ensure the workflow runs on a Docker-capable runner.",
             )
 

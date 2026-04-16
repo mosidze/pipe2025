@@ -1,6 +1,7 @@
 name: github-actions-autoheal-showcase
 
 on:
+  push:
   workflow_dispatch:
     inputs:
       iteration:
@@ -13,6 +14,39 @@ permissions:
   actions: write
 
 jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Install hadolint
+        run: |
+          curl -fsSL -o /usr/local/bin/hadolint https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64
+          chmod +x /usr/local/bin/hadolint
+
+      - name: Install actionlint
+        run: |
+          curl -fsSL -o /tmp/download-actionlint.bash https://raw.githubusercontent.com/rhysd/actionlint/v1.7.1/scripts/download-actionlint.bash
+          bash /tmp/download-actionlint.bash 1.7.1 /usr/local/bin
+
+      - name: Run linters
+        run: |
+          hadolint Dockerfile
+          actionlint
+          yamllint -s docker-compose.yml .github/
+
+      - name: Run tests
+        run: pytest scripts/tests/ -v
+
   diagnose:
     runs-on: ubuntu-latest
     outputs:
@@ -116,18 +150,18 @@ jobs:
           fi
 
           workflow_touched="$(python - <<'PY'
-import json
-from pathlib import Path
-state = json.loads(Path("artifacts/remediation_state.json").read_text())
-print("true" if state.get("workflow_touched") else "false")
-PY
+          import json
+          from pathlib import Path
+          state = json.loads(Path("artifacts/remediation_state.json").read_text())
+          print("true" if state.get("workflow_touched") else "false")
+          PY
           )"
           commit_message="$(python - <<'PY'
-import json
-from pathlib import Path
-plan = json.loads(Path("artifacts/remediation_plan.json").read_text())
-print(plan.get("commit_message", "autoheal: apply AI remediation"))
-PY
+          import json
+          from pathlib import Path
+          plan = json.loads(Path("artifacts/remediation_plan.json").read_text())
+          print(plan.get("commit_message", "autoheal: apply AI remediation"))
+          PY
           )"
 
           branch="autoheal/run-${RUN_ID}-${RUN_ATTEMPT}"
