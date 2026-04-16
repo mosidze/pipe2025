@@ -1,0 +1,156 @@
+name: github-actions-autoheal-showcase
+
+on:
+  workflow_dispatch:
+    inputs:
+      iteration:
+        description: "Autoheal iteration counter"
+        required: false
+        default: "0"
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    outputs:
+      blocking_issues_found: ${{ steps.findings.outputs.blocking_issues_found }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Run pre-heal verification
+        continue-on-error: true
+        env:
+          VERIFY_URL: http://127.0.0.1:8080
+        run: python scripts/verify_showcase.py --output-dir artifacts/preheal --url "$VERIFY_URL"
+
+      - name: Collect findings
+        id: findings
+        run: python scripts/collect_findings.py --verification artifacts/preheal/verification.json --logs artifacts/preheal/runtime.log --output artifacts/findings.json
+
+      - name: Upload diagnosis artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnosis
+          path: artifacts/
+
+  autoheal:
+    runs-on: ubuntu-latest
+    needs: diagnose
+    if: needs.diagnose.outputs.blocking_issues_found == 'true'
+    env:
+      AI_API_KEY: ${{ secrets.AI_API_KEY }}
+      AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
+      AI_MODEL: ${{ secrets.AI_MODEL }}
+      AI_PROVIDER: ${{ secrets.AI_PROVIDER }}
+      VERIFY_URL: http://127.0.0.1:8080
+      AUTOHEAL_ITERATION: ${{ inputs.iteration }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Download diagnosis artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: diagnosis
+          path: artifacts
+
+      - name: Generate remediation plan
+        run: python scripts/generate_remediation_plan.py --findings artifacts/findings.json --output artifacts/remediation_plan.json
+
+      - name: Validate remediation plan
+        run: python scripts/validate_remediation.py --plan artifacts/remediation_plan.json
+
+      - name: Apply AI remediation
+        run: python scripts/apply_remediation.py --plan artifacts/remediation_plan.json --patch artifacts/proposed.patch
+
+      - name: Run post-heal verification
+        id: post_verify
+        continue-on-error: true
+        run: python scripts/verify_showcase.py --output-dir artifacts/postheal --url "$VERIFY_URL"
+
+      - name: Build final report
+        run: python scripts/render_summary.py --findings artifacts/findings.json --plan artifacts/remediation_plan.json --pre artifacts/preheal/verification.json --post artifacts/postheal/verification.json --state artifacts/remediation_state.json --output artifacts/final_report.md
+
+      - name: Upload autoheal artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: autoheal-results
+          path: artifacts/
+
+      - name: Publish step summary
+        if: always()
+        run: cat artifacts/final_report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit healed Docker and workflow files
+        if: steps.post_verify.outcome == 'success'
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --quiet -- Dockerfile docker-compose.yml .github/workflows; then
+            echo "No AI changes to commit."
+            exit 0
+          fi
+
+          workflow_touched="$(python - <<'PY'
+import json
+from pathlib import Path
+state = json.loads(Path("artifacts/remediation_state.json").read_text())
+print("true" if state.get("workflow_touched") else "false")
+PY
+          )"
+          commit_message="$(python - <<'PY'
+import json
+from pathlib import Path
+plan = json.loads(Path("artifacts/remediation_plan.json").read_text())
+print(plan.get("commit_message", "autoheal: apply AI remediation"))
+PY
+          )"
+
+          branch="autoheal/run-${RUN_ID}-${RUN_ATTEMPT}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add Dockerfile docker-compose.yml .github/workflows
+          git commit -m "$commit_message"
+          git push origin "$branch"
+
+          if [ "$workflow_touched" = "true" ] && [ "${AUTOHEAL_ITERATION:-0}" -lt 1 ]; then
+            gh workflow run autoheal-showcase.yml --ref "$branch" -f iteration=$((AUTOHEAL_ITERATION + 1))
+          fi
+
+  no_issues:
+    runs-on: ubuntu-latest
+    needs: diagnose
+    if: needs.diagnose.outputs.blocking_issues_found != 'true'
+    steps:
+      - name: Report clean state
+        run: |
+          {
+            echo "## Self-Healing Showcase"
+            echo ""
+            echo "No blocking Docker or pipeline failures were detected. No AI remediation was triggered."
+          } >> "$GITHUB_STEP_SUMMARY"
