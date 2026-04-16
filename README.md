@@ -16,7 +16,7 @@ This repository packages a small Go login API as a GitHub Actions self-healing C
 3. Generate a remediation plan from those findings with an OpenAI-compatible AI API.
 4. Apply the proposed Docker and workflow edits.
 5. Re-run verification and publish artifacts plus a step summary.
-6. If verification passes, push the healed changes to an `autoheal/*` branch.
+6. If verification passes, push the healed changes to an `autoheal/*` branch and open a PR.
 
 ## Trigger the heal on a clean fork
 
@@ -37,3 +37,18 @@ Run `docker compose up --build` in the repository root to start the API on `loca
 ## AI configuration
 
 Copy `.env.example` to `.env` and set either the OpenAI-compatible values or the Ollama values. The scripts call an OpenAI-style `POST /chat/completions` API, with Ollama supported through its compatible local endpoint.
+
+## Operator controls
+
+- Setting repo variable `AUTOHEAL_DISABLED=true` skips the autoheal job while `diagnose` still runs.
+- Heal history lives in `artifacts/heal_history/` inside each autoheal PR diff.
+- Token usage is recorded in `artifacts/ai_usage.jsonl`.
+
+## Reviewing an autoheal PR
+
+- [ ] Diff is small and targeted to findings listed in PR body.
+- [ ] hadolint / actionlint / yamllint green in lint-and-test job.
+- [ ] No widening of `permissions:` (look at workflow diff).
+- [ ] No new `${{ secrets.* }}` references.
+- [ ] Third-party actions pinned by SHA.
+- [ ] Heal history JSON file present in the diff.

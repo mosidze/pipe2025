@@ -9,9 +9,14 @@ on:
         required: false
         default: "0"
 
+concurrency:
+  group: autoheal-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
   actions: write
+  pull-requests: write
 
 jobs:
   lint-and-test:
@@ -82,15 +87,17 @@ jobs:
   autoheal:
     runs-on: ubuntu-latest
     needs: diagnose
-    if: needs.diagnose.outputs.blocking_issues_found == 'true'
+    if: needs.diagnose.outputs.blocking_issues_found == 'true' && vars.AUTOHEAL_DISABLED != 'true' && vars.AUTOHEAL_DISABLED != '1'
     env:
-      AI_API_KEY: ${{ secrets.AI_API_KEY }}
-      AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
-      AI_MODEL: ${{ secrets.AI_MODEL }}
-      AI_PROVIDER: ${{ secrets.AI_PROVIDER }}
       VERIFY_URL: http://127.0.0.1:8080
-      AUTOHEAL_ITERATION: ${{ inputs.iteration }}
+      AUTOHEAL_ITERATION: ${{ inputs.iteration || '0' }}
     steps:
+      - name: Check killswitch
+        if: ${{ vars.AUTOHEAL_DISABLED == 'true' || vars.AUTOHEAL_DISABLED == '1' }}
+        run: |
+          echo "AUTOHEAL_DISABLED is set; skipping autoheal." >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -111,6 +118,11 @@ jobs:
           path: artifacts
 
       - name: Generate remediation plan
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
+          AI_PROVIDER: ${{ secrets.AI_PROVIDER }}
         run: python scripts/generate_remediation_plan.py --findings artifacts/findings.json --output artifacts/remediation_plan.json
 
       - name: Validate remediation plan
@@ -124,8 +136,20 @@ jobs:
         continue-on-error: true
         run: python scripts/verify_showcase.py --output-dir artifacts/postheal --url "$VERIFY_URL"
 
+      - name: Persist heal record
+        if: always()
+        run: |
+          python scripts/write_heal_record.py \
+            --findings artifacts/findings.json \
+            --plan artifacts/remediation_plan.json \
+            --pre artifacts/preheal/verification.json \
+            --post artifacts/postheal/verification.json \
+            --state artifacts/remediation_state.json \
+            --usage artifacts/ai_usage.jsonl \
+            --output artifacts/heal_history/${{ github.run_id }}.json
+
       - name: Build final report
-        run: python scripts/render_summary.py --findings artifacts/findings.json --plan artifacts/remediation_plan.json --pre artifacts/preheal/verification.json --post artifacts/postheal/verification.json --state artifacts/remediation_state.json --output artifacts/final_report.md
+        run: python scripts/render_summary.py --findings artifacts/findings.json --plan artifacts/remediation_plan.json --pre artifacts/preheal/verification.json --post artifacts/postheal/verification.json --state artifacts/remediation_state.json --usage artifacts/ai_usage.jsonl --output artifacts/final_report.md
 
       - name: Upload autoheal artifacts
         uses: actions/upload-artifact@v4
@@ -137,14 +161,14 @@ jobs:
         if: always()
         run: cat artifacts/final_report.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Commit healed Docker and workflow files
+      - name: Create heal PR
         if: steps.post_verify.outcome == 'success'
         env:
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if git diff --quiet -- Dockerfile docker-compose.yml .github/workflows; then
+          if git diff --quiet -- Dockerfile docker-compose.yml .github/workflows artifacts/heal_history; then
             echo "No AI changes to commit."
             exit 0
           fi
@@ -169,8 +193,70 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
           git add Dockerfile docker-compose.yml .github/workflows
+          git add -f "artifacts/heal_history/${RUN_ID}.json" artifacts/heal_history/INDEX.jsonl
           git commit -m "$commit_message"
           git push origin "$branch"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          plan = json.loads(Path("artifacts/remediation_plan.json").read_text())
+          findings = json.loads(Path("artifacts/findings.json").read_text())
+          state = json.loads(Path("artifacts/remediation_state.json").read_text())
+          heal_record = json.loads(Path(f"artifacts/heal_history/{os.environ['RUN_ID']}.json").read_text())
+          patch = Path("artifacts/proposed.patch").read_text()[:5000]
+
+          summary = " ".join(str(plan.get("summary", "AI remediation")).split()) or "AI remediation"
+          title_summary = summary[:60]
+          if len(summary) > 60:
+              title_summary = f"{summary[:57]}..."
+          Path("artifacts/pr_title.txt").write_text(f"autoheal: {title_summary}\n")
+
+          issue_titles = {}
+          for issue in findings.get("issues", []) + findings.get("advisory_issues", []):
+              issue_id = issue.get("id")
+              if issue_id:
+                  issue_titles[str(issue_id)] = issue.get("title", "")
+
+          targeted = []
+          for item in plan.get("targeted_findings", []):
+              if isinstance(item, dict):
+                  finding_id = item.get("id")
+              else:
+                  finding_id = item
+              if finding_id:
+                  targeted.append(f"- {finding_id}: {issue_titles.get(str(finding_id), 'unknown finding')}")
+          if not targeted:
+              targeted.append("- None")
+
+          files_touched = [f"- {path}" for path in state.get("files_touched", [])] or ["- None"]
+          model = heal_record.get("model") or "unknown-model"
+          workflow_run = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['RUN_ID']}"
+
+          body_lines = [
+              "## Auto-generated remediation",
+              summary,
+              "### Findings addressed",
+              *targeted,
+              "### Files touched",
+              *files_touched,
+              "### Token usage",
+              f"- {heal_record.get('tokens_total', 0)} tokens, {model}",
+              "### Workflow run",
+              f"- {workflow_run}",
+              "### Diff (truncated)",
+              "```diff",
+              patch,
+              "```",
+          ]
+          Path("artifacts/pr_body.md").write_text("\n".join(body_lines) + "\n")
+          PY
+
+          gh pr create --title "$(cat artifacts/pr_title.txt)" \
+                       --label autoheal --label automated \
+                       --body-file artifacts/pr_body.md
 
           if [ "$workflow_touched" = "true" ] && [ "${AUTOHEAL_ITERATION:-0}" -lt 1 ]; then
             gh workflow run autoheal-showcase.yml --ref "$branch" -f iteration=$((AUTOHEAL_ITERATION + 1))

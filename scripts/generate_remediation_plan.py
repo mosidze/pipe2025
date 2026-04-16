@@ -2,7 +2,10 @@ import argparse
 import json
 from pathlib import Path
 
-from ai_client import call_ai_json
+try:
+    from usage_tracker import call_tracked
+except ImportError:  # pragma: no cover - package import path
+    from .usage_tracker import call_tracked
 
 
 ALLOWED_PATHS = [
@@ -103,7 +106,7 @@ Return JSON with this shape:
 }}
 """
 
-    plan = call_ai_json(system_prompt, user_prompt)
+    plan = call_tracked(system_prompt, user_prompt, step="generate_plan")
     validated = validate_plan(plan)
 
     output_path = Path(args.output)

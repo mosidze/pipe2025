@@ -8,6 +8,7 @@ API key.
 
 import json
 import os
+import time
 from pathlib import Path
 
 import requests
@@ -57,7 +58,7 @@ def get_ai_config() -> dict:
     }
 
 
-def call_ai_json(system_prompt: str, user_prompt: str) -> dict:
+def call_ai_json_with_metadata(system_prompt: str, user_prompt: str) -> dict:
     config = get_ai_config()
     headers = {
         "Authorization": f"Bearer {config['api_key']}",
@@ -72,6 +73,7 @@ def call_ai_json(system_prompt: str, user_prompt: str) -> dict:
         ],
     }
 
+    started_at = time.perf_counter()
     response = requests.post(
         f"{config['base_url']}/chat/completions",
         headers=headers,
@@ -95,4 +97,13 @@ def call_ai_json(system_prompt: str, user_prompt: str) -> dict:
     content = response_payload["choices"][0]["message"]["content"]
     if isinstance(content, list):
         content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
-    return json.loads(content)
+    return {
+        "result": json.loads(content),
+        "response_payload": response_payload,
+        "model": response_payload.get("model", config["model"]),
+        "latency_ms": int((time.perf_counter() - started_at) * 1000),
+    }
+
+
+def call_ai_json(system_prompt: str, user_prompt: str) -> dict:
+    return call_ai_json_with_metadata(system_prompt, user_prompt)["result"]

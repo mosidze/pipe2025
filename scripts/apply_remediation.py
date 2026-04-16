@@ -12,11 +12,13 @@ def main() -> None:
 
     plan = json.loads(Path(args.plan).read_text())
     workflow_touched = False
+    files_touched = []
 
     for change in plan.get("changes", []):
         path = Path(change["path"])
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(change["content"])
+        files_touched.append(str(path))
         if str(path).startswith(".github/workflows/"):
             workflow_touched = True
 
@@ -29,7 +31,13 @@ def main() -> None:
     Path(args.patch).write_text(diff.stdout)
     Path("artifacts").mkdir(exist_ok=True)
     Path("artifacts/remediation_state.json").write_text(
-        json.dumps({"workflow_touched": workflow_touched}, indent=2)
+        json.dumps(
+            {
+                "workflow_touched": workflow_touched,
+                "files_touched": files_touched,
+            },
+            indent=2,
+        )
     )
 
 

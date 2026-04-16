@@ -5,6 +5,7 @@ __pycache__/
 artifacts/
 !artifacts/heal_history/
 !artifacts/heal_history/.gitkeep
+!artifacts/heal_history/**
 reports/
 bin/
 .vs/
