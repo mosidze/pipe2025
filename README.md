@@ -6,8 +6,8 @@ This repository packages a small Go login API as a GitHub Actions self-healing C
 
 1. Fork the repo.
 2. In Settings → Secrets, add `AI_API_KEY` (any OpenAI-compatible provider).
-3. Go to Actions → `github-actions-autoheal-showcase` → Run workflow.
-4. Watch the diagnose job find issues, the autoheal job propose a fix, and a PR appear on your fork.
+3. Run `make demo-break`, commit the broken `Dockerfile`, and push your branch.
+4. Watch `devsecops` find issues, AI triage them, trigger `autoheal-showcase` with a security handoff, and open a PR on your fork.
 
 ## Self-Healing Showcase flow
 
@@ -37,6 +37,19 @@ Run `docker compose up --build` in the repository root to start the API on `loca
 ## AI configuration
 
 Copy `.env.example` to `.env` and set either the OpenAI-compatible values or the Ollama values. The scripts call an OpenAI-style `POST /chat/completions` API, with Ollama supported through its compatible local endpoint.
+
+## DevSecOps pipeline
+
+The repository includes a GitHub-native DevSecOps workflow in `.github/workflows/devsecops.yml`.
+
+- SAST: `gosec` and `govulncheck` scan the Go codebase and upload SARIF to the GitHub Security tab.
+- Secret detection: `gitleaks` scans the repository history and reports leaks as SARIF.
+- SCA: Trivy scans both the repository filesystem and the built container image for HIGH and CRITICAL findings.
+- DAST: ZAP baseline runs against the local stack with a hard `-T 3` minute timeout and the JSON report is converted to SARIF.
+- AI triage: the SARIF outputs are aggregated, summarized, and gated into `allow`, `warn`, or `block`, with only docker-scoped auto-fixes eligible for the autoheal bridge.
+- Bridge to autoheal: when AI triage marks a docker-scope finding as auto-fixable, the workflow dispatches `autoheal-showcase` with a `security_source_run_id` handoff.
+
+The SAST layer on Go code is intentionally READ-ONLY for AI. It can surface Go findings in reports, but it never proposes patches to application code, `go.mod`, or `go.sum`.
 
 ## Operator controls
 

@@ -10,7 +10,16 @@ import yaml
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
 
-def add_issue(issues: list, issue_id: str, severity: str, file_path: str, title: str, evidence: str, recommendation: str) -> None:
+def add_issue(
+    issues: list,
+    issue_id: str,
+    severity: str,
+    file_path: str,
+    title: str,
+    evidence: str,
+    recommendation: str,
+    source: str = "showcase",
+) -> None:
     issues.append(
         {
             "id": issue_id,
@@ -19,6 +28,7 @@ def add_issue(issues: list, issue_id: str, severity: str, file_path: str, title:
             "title": title,
             "evidence": evidence,
             "recommendation": recommendation,
+            "source": source,
         }
     )
 
@@ -243,11 +253,55 @@ def inspect_verification(issues: list, verification_path: Path, logs_path: Path)
             )
 
 
+def merge_security_handoff(issues: list, handoff_path: Path) -> None:
+    if not handoff_path.exists():
+        return
+
+    payload = json.loads(handoff_path.read_text())
+    targeted_findings = payload.get("targeted_findings")
+    if targeted_findings is None:
+        targeted_findings = payload.get("autoheal_handoff", {}).get("targeted_findings", [])
+
+    if not isinstance(targeted_findings, list):
+        return
+
+    for finding in targeted_findings:
+        if not isinstance(finding, dict):
+            continue
+        if finding.get("path_scope") != "docker":
+            continue
+
+        scanner = str(finding.get("scanner", "unknown"))
+        rule_id = str(finding.get("rule_id", "unknown"))
+        title = str(finding.get("recommended_fix") or finding.get("explanation") or rule_id)
+        add_issue(
+            issues,
+            f"security:{scanner}:{rule_id}",
+            "high",
+            str(finding.get("location", "security_scan")),
+            title,
+            json.dumps(
+                {
+                    "scanner": scanner,
+                    "rule_id": rule_id,
+                    "severity": finding.get("severity", ""),
+                    "path_scope": finding.get("path_scope", ""),
+                    "explanation": finding.get("explanation", ""),
+                    "recommended_fix": finding.get("recommended_fix", ""),
+                },
+                indent=2,
+            ),
+            str(finding.get("recommended_fix") or finding.get("explanation") or "Review security scan finding."),
+            source="security_scan",
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--verification", required=True)
     parser.add_argument("--logs", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--security-handoff", required=False)
     args = parser.parse_args()
 
     issues = []
@@ -256,6 +310,8 @@ def main() -> None:
     inspect_compose(issues, advisory_issues)
     inspect_workflow(issues, advisory_issues)
     inspect_verification(issues, Path(args.verification), Path(args.logs))
+    if args.security_handoff:
+        merge_security_handoff(issues, Path(args.security_handoff))
 
     output = {
         "status": "blocking_issues_found" if issues else "clean",

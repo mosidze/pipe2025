@@ -67,6 +67,7 @@ Never widen GitHub Actions permissions beyond what is already in the workflow.
 Never add new ${{ secrets.X }} references.
 Always pin third-party actions (anything not under actions/*) by 40-char SHA.
 Never use `curl ... | sh`, `wget ... | bash`, `eval $(...)`, or any pattern that fetches code and executes it in one step.
+Findings with source='security_scan' come from trusted deterministic scanners. You MAY propose Dockerfile or docker-compose changes to address them, including bumping base image versions. You MAY NOT modify Go source, go.mod, or go.sum.
 """
 
     user_prompt = f"""

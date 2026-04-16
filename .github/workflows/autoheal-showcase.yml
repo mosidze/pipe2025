@@ -8,6 +8,10 @@ on:
         description: "Autoheal iteration counter"
         required: false
         default: "0"
+      security_source_run_id:
+        description: "Optional devsecops workflow run id carrying security handoff"
+        required: false
+        default: ""
 
 concurrency:
   group: autoheal-${{ github.ref }}
@@ -74,9 +78,22 @@ jobs:
           VERIFY_URL: http://127.0.0.1:8080
         run: python scripts/verify_showcase.py --output-dir artifacts/preheal --url "$VERIFY_URL"
 
+      - name: Pull security handoff (if any)
+        if: ${{ inputs.security_source_run_id != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p artifacts
+          gh run download ${{ inputs.security_source_run_id }} -n security-handoff -D artifacts/ || true
+
       - name: Collect findings
         id: findings
-        run: python scripts/collect_findings.py --verification artifacts/preheal/verification.json --logs artifacts/preheal/runtime.log --output artifacts/findings.json
+        run: |
+          args="--verification artifacts/preheal/verification.json --logs artifacts/preheal/runtime.log --output artifacts/findings.json"
+          if [ -f artifacts/security_handoff.json ]; then
+            args="$args --security-handoff artifacts/security_handoff.json"
+          fi
+          python scripts/collect_findings.py $args
 
       - name: Upload diagnosis artifacts
         uses: actions/upload-artifact@v4

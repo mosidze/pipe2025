@@ -50,3 +50,36 @@ WORKDIR /src
 RUN go install github.com/coolbet/login/cmd/login
 ENTRYPOINT login
 """
+
+
+@pytest.fixture
+def sample_security_findings() -> dict:
+    return {
+        "findings": [
+            {
+                "scanner": "trivy-image",
+                "rule_id": "CVE-DOCKER-1",
+                "severity": "HIGH",
+                "location": "Dockerfile",
+                "message": "Base image is vulnerable",
+                "path_scope": "docker",
+            },
+            {
+                "scanner": "gosec",
+                "rule_id": "G401",
+                "severity": "MEDIUM",
+                "location": "service.go",
+                "message": "Weak crypto",
+                "path_scope": "go_code",
+            },
+            {
+                "scanner": "gitleaks",
+                "rule_id": "git-secret",
+                "severity": "LOW",
+                "location": ".env",
+                "message": "Hardcoded secret",
+                "path_scope": "secret",
+            },
+        ],
+        "meta": {"scanners": ["trivy-image", "gosec", "gitleaks"], "count": 3},
+    }
