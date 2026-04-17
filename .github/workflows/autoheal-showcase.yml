@@ -89,11 +89,18 @@ jobs:
       - name: Collect findings
         id: findings
         run: |
-          args="--verification artifacts/preheal/verification.json --logs artifacts/preheal/runtime.log --output artifacts/findings.json"
           if [ -f artifacts/security_handoff.json ]; then
-            args="$args --security-handoff artifacts/security_handoff.json"
+            python scripts/collect_findings.py \
+              --verification artifacts/preheal/verification.json \
+              --logs artifacts/preheal/runtime.log \
+              --output artifacts/findings.json \
+              --security-handoff artifacts/security_handoff.json
+          else
+            python scripts/collect_findings.py \
+              --verification artifacts/preheal/verification.json \
+              --logs artifacts/preheal/runtime.log \
+              --output artifacts/findings.json
           fi
-          python scripts/collect_findings.py $args
 
       - name: Upload diagnosis artifacts
         uses: actions/upload-artifact@v4

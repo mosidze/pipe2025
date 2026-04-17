@@ -51,6 +51,15 @@ The repository includes a GitHub-native DevSecOps workflow in `.github/workflows
 
 The SAST layer on Go code is intentionally READ-ONLY for AI. It can surface Go findings in reports, but it never proposes patches to application code, `go.mod`, or `go.sum`.
 
+### Required secrets on your fork
+
+Set these four in Settings → Secrets and variables → Actions before the first push — the `ai-triage` job fails fast (by design) without a key, because AI is the centerpiece of this demo, not an optional extra.
+
+- `AI_API_KEY` — any OpenAI-compatible key (e.g. Groq free tier).
+- `AI_PROVIDER` — `openai-compatible` (or `ollama` for local).
+- `AI_BASE_URL` — e.g. `https://api.groq.com/openai/v1`.
+- `AI_MODEL` — e.g. `llama-3.1-70b-versatile`.
+
 ## Operator controls
 
 - Setting repo variable `AUTOHEAL_DISABLED=true` skips the autoheal job while `diagnose` still runs.

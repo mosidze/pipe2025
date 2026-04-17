@@ -4,14 +4,23 @@ from pathlib import Path
 
 
 def load_stream(path: Path) -> tuple[dict, list[dict]]:
-    osvs = {}
-    findings = []
+    osvs: dict = {}
+    findings: list[dict] = []
     if not path.exists():
         return osvs, findings
-    for line in path.read_text().splitlines():
-        if not line.strip():
+    text = path.read_text().strip()
+    if not text:
+        return osvs, findings
+    decoder = json.JSONDecoder()
+    idx = 0
+    length = len(text)
+    while idx < length:
+        item, end = decoder.raw_decode(text, idx)
+        idx = end
+        while idx < length and text[idx].isspace():
+            idx += 1
+        if not isinstance(item, dict):
             continue
-        item = json.loads(line)
         normalized = {str(key).lower(): value for key, value in item.items()}
         osv = normalized.get("osv")
         finding = normalized.get("finding")
@@ -21,8 +30,6 @@ def load_stream(path: Path) -> tuple[dict, list[dict]]:
                 osvs[str(osv_id)] = osv
         if isinstance(finding, dict):
             findings.append(finding)
-        elif "finding" not in normalized and ("osv" in normalized or "config" in normalized or "progress" in normalized):
-            continue
     return osvs, findings
 
 

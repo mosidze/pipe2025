@@ -50,27 +50,27 @@ def main() -> None:
             seen_rules.add(rule_id)
 
         instances = alert.get("instances", [])
-        location = ""
+        target_uri = ""
         if instances:
-            location = str(instances[0].get("uri", ""))
+            target_uri = str(instances[0].get("uri", ""))
+
+        result_properties = {"security-severity": security_severity}
+        if target_uri:
+            result_properties["targetUri"] = target_uri
 
         results.append(
             {
                 "ruleId": rule_id,
                 "level": level,
                 "message": {"text": str(alert.get("desc", alert.get("name", rule_id)))},
-                "properties": {"security-severity": security_severity},
+                "properties": result_properties,
                 "locations": [
                     {
                         "physicalLocation": {
-                            "artifactLocation": {
-                                "uri": location,
-                            }
+                            "artifactLocation": {"uri": "docker-compose.yml"},
                         }
                     }
-                ]
-                if location
-                else [],
+                ],
             }
         )
 
