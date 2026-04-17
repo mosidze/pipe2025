@@ -58,7 +58,7 @@ Set these four in Settings → Secrets and variables → Actions before the firs
 - `AI_API_KEY` — any OpenAI-compatible key (e.g. Groq free tier).
 - `AI_PROVIDER` — `openai-compatible` (or `ollama` for local).
 - `AI_BASE_URL` — e.g. `https://api.groq.com/openai/v1`.
-- `AI_MODEL` — e.g. `llama-3.1-70b-versatile`.
+- `AI_MODEL` — e.g. `llama-3.3-70b-versatile` (Groq's active 70B model; `llama-3.1-70b-versatile` was decommissioned in October 2025).
 
 ## Operator controls
 
