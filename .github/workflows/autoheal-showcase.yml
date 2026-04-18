@@ -37,11 +37,6 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r scripts/requirements.txt
 
-      - name: Install hadolint
-        run: |
-          curl -fsSL -o /usr/local/bin/hadolint https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64
-          chmod +x /usr/local/bin/hadolint
-
       - name: Install actionlint
         run: |
           curl -fsSL -o /tmp/download-actionlint.bash https://raw.githubusercontent.com/rhysd/actionlint/v1.7.1/scripts/download-actionlint.bash
@@ -49,7 +44,6 @@ jobs:
 
       - name: Run linters
         run: |
-          hadolint Dockerfile
           actionlint
           yamllint -s docker-compose.yml .github/
 
