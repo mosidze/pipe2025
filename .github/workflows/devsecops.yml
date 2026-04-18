@@ -328,4 +328,4 @@ jobs:
           echo "AI gate: ${{ needs.ai-triage.outputs.gate }}" >> "$GITHUB_STEP_SUMMARY"
           echo "Environment: ${{ needs.ai-triage.outputs.gate == 'block' && 'autoheal-human (human approval)' || 'autoheal-auto (auto-proceed)' }}" >> "$GITHUB_STEP_SUMMARY"
       - name: Trigger autoheal showcase
-        run: gh workflow run autoheal-showcase.yml --ref ${{ github.ref }} -f security_source_run_id=${{ github.run_id }}
+        run: gh workflow run autoheal-showcase.yml --repo ${{ github.repository }} --ref ${{ github.ref }} -f security_source_run_id=${{ github.run_id }}
