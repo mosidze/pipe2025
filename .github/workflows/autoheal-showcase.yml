@@ -278,6 +278,9 @@ jobs:
           Path("artifacts/pr_body.md").write_text("\n".join(body_lines) + "\n")
           PY
 
+          gh label create autoheal --color 0E8A16 --description "AI-generated autoheal PR" 2>/dev/null || true
+          gh label create automated --color C5DEF5 --description "Automated PR" 2>/dev/null || true
+
           gh pr create --title "$(cat artifacts/pr_title.txt)" \
                        --label autoheal --label automated \
                        --body-file artifacts/pr_body.md
