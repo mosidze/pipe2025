@@ -87,32 +87,17 @@ def build_triaged_findings(findings: list[dict], model_findings: list[dict]) -> 
 
 
 def build_handoff(response: dict, triaged_findings: list[dict]) -> dict:
+    # Eligibility is structural: any docker-scoped finding is handoff-eligible
+    # because generate_remediation_plan.py + validate_remediation.py already
+    # restrict the heal to Dockerfile / docker-compose / workflow files. The
+    # model's triage label is advisory UX, not the gate — we do not require it
+    # to pick auto_fix before bridging.
     eligible_findings = [
-        finding
-        for finding in triaged_findings
-        if finding.get("triage") == "auto_fix" and finding.get("path_scope") == "docker"
+        finding for finding in triaged_findings if finding.get("path_scope") == "docker"
     ]
-    allowed = {(finding["scanner"], finding["rule_id"]) for finding in eligible_findings}
-
-    requested = response.get("autoheal_handoff", {}).get("targeted_findings", [])
-    filtered = []
-    if isinstance(requested, list):
-        for item in requested:
-            if not isinstance(item, dict):
-                continue
-            scanner = str(item.get("scanner", ""))
-            rule_id = str(item.get("rule_id", ""))
-            if (scanner, rule_id) not in allowed:
-                continue
-            for finding in eligible_findings:
-                if finding["scanner"] == scanner and finding["rule_id"] == rule_id:
-                    filtered.append(finding)
-                    break
-
-    eligible = bool(response.get("autoheal_handoff", {}).get("eligible", False) and filtered)
     return {
-        "eligible": eligible,
-        "targeted_findings": filtered,
+        "eligible": bool(eligible_findings),
+        "targeted_findings": eligible_findings,
     }
 
 

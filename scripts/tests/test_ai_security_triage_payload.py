@@ -102,7 +102,9 @@ def test_ai_security_triage_chunks_after_payload_too_large(tmp_path, monkeypatch
     handoff = json.loads(handoff_path.read_text())
     assert handoff["gate"] == "warn"
     assert handoff["eligible"] is True
-    assert [item["rule_id"] for item in handoff["targeted_findings"]] == returned_rule_ids
+    handoff_rule_ids = {item["rule_id"] for item in handoff["targeted_findings"]}
+    assert handoff_rule_ids == {f"RULE-{i}" for i in range(25)}
+    assert set(returned_rule_ids).issubset(handoff_rule_ids)
 
     report = report_path.read_text()
     assert "413 after trim" not in report
