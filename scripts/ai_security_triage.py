@@ -283,11 +283,12 @@ def render_unavailable_report(summary: str, findings: list[dict], trim_stats: di
     return "\n".join(lines).strip() + "\n"
 
 
-def write_outputs(eligible: bool) -> None:
+def write_outputs(eligible: bool, gate: str) -> None:
     github_output = os.getenv("GITHUB_OUTPUT")
     if github_output:
         with Path(github_output).open("a") as handle:
             handle.write(f"autoheal_eligible={'true' if eligible else 'false'}\n")
+            handle.write(f"gate={gate}\n")
 
 
 def write_report(path: Path, report: str) -> None:
@@ -407,7 +408,7 @@ def main() -> None:
     elif handoff_path.exists():
         handoff_path.unlink()
 
-    write_outputs(handoff["eligible"])
+    write_outputs(handoff["eligible"], gate)
     print(f"gate={gate}")
     print(f"eligible={handoff['eligible']} targeted={len(handoff['targeted_findings'])}")
 

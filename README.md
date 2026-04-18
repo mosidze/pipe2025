@@ -68,6 +68,20 @@ Payload budget: `ai-triage` trims findings to the top 40 by severity before the 
 - Heal history lives in `artifacts/heal_history/` inside each autoheal PR diff.
 - Token usage is recorded in `artifacts/ai_usage.jsonl`.
 
+### Human-in-the-loop gate (one-time fork setup)
+
+The `trigger-autoheal` job uses a dynamic environment based on the AI gate:
+
+- `gate=allow` / `gate=warn` → environment `autoheal-auto` (auto-proceeds).
+- `gate=block` → environment `autoheal-human` (waits for a reviewer click in the Actions UI: "Review deployments" → Approve).
+
+Create both in Settings → Environments on your fork:
+
+- `autoheal-auto` — no protection rules.
+- `autoheal-human` — add yourself as a Required reviewer.
+
+Until the environments exist the job will pause; add them once and the flow works for every run.
+
 ## Reviewing an autoheal PR
 
 - [ ] Diff is small and targeted to findings listed in PR body.
