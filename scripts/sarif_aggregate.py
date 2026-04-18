@@ -3,10 +3,15 @@ import json
 from pathlib import Path
 
 
+KNOWN_SCANNERS = {"trivy-image", "trivy-fs", "gosec", "govulncheck", "gitleaks", "zap"}
+
+
 def normalize_scanner(path: Path, driver_name: str) -> str:
     stem = path.stem
     if stem.startswith("sarif-"):
-        return stem.removeprefix("sarif-")
+        stem = stem.removeprefix("sarif-")
+    if stem in KNOWN_SCANNERS:
+        return stem
 
     normalized = driver_name.strip().lower().replace(" ", "-")
     if normalized == "owasp-zap":

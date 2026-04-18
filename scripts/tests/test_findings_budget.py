@@ -49,16 +49,16 @@ def test_trim_findings_keeps_top_40_sorted_and_prefers_docker():
     assert len(retained_critical_docker) == len(critical_docker)
 
 
-def test_trim_findings_keeps_all_docker_when_docker_exceeds_cap():
+def test_trim_findings_caps_at_max_even_when_docker_exceeds_cap():
     findings = [make_finding(index, "HIGH", "docker", "trivy-image") for index in range(200)]
 
     trimmed, stats = trim_findings(findings, max_findings=40)
 
-    assert len(trimmed) == 200
+    assert len(trimmed) == 40
     assert stats["input_count"] == 200
-    assert stats["output_count"] == 200
-    assert stats["docker_retained"] == 200
-    assert stats["docker_dropped"] == 0
+    assert stats["output_count"] == 40
+    assert stats["docker_retained"] == 40
+    assert stats["docker_dropped"] == 160
 
 
 def test_trim_findings_truncates_long_messages():

@@ -106,3 +106,50 @@ def test_sarif_aggregate_normalizes_and_classifies(tmp_path):
     assert findings[("gosec", "G401")]["path_scope"] == "go_code"
     assert findings[("gitleaks", "secret-1")]["path_scope"] == "secret"
     assert payload["meta"]["count"] == 3
+
+
+def test_sarif_aggregate_handles_trivy_without_sarif_prefix(tmp_path):
+    import sys
+
+    input_dir = tmp_path / "sarif"
+    input_dir.mkdir()
+
+    for name in ("trivy-image.sarif", "trivy-fs.sarif"):
+        (input_dir / name).write_text(
+            json.dumps(
+                {
+                    "runs": [
+                        {
+                            "tool": {"driver": {"name": "Trivy", "rules": []}},
+                            "results": [
+                                {
+                                    "ruleId": f"CVE-{name}",
+                                    "level": "error",
+                                    "message": {"text": "finding"},
+                                    "locations": [
+                                        {
+                                            "physicalLocation": {
+                                                "artifactLocation": {"uri": "/usr/lib/pkg"}
+                                            }
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ]
+                }
+            )
+        )
+
+    output_path = tmp_path / "out.json"
+    old_argv = sys.argv
+    sys.argv = ["sarif_aggregate.py", "--input-dir", str(input_dir), "--output", str(output_path)]
+    try:
+        main()
+    finally:
+        sys.argv = old_argv
+
+    payload = json.loads(output_path.read_text())
+    scopes = {item["scanner"]: item["path_scope"] for item in payload["findings"]}
+    assert scopes["trivy-image"] == "docker"
+    assert scopes["trivy-fs"] == "other"

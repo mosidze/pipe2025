@@ -52,15 +52,8 @@ def trim_findings(
 
     max_findings = max(0, max_findings)
     sorted_indexed = sorted(enumerate(findings), key=_sort_key)
-    sorted_findings = [finding for _, finding in sorted_indexed]
 
-    docker_indexed = [(index, finding) for index, finding in sorted_indexed if finding.get("path_scope") == "docker"]
-
-    if len(docker_indexed) > max_findings:
-        selected_indexed = docker_indexed
-    else:
-        selected_indexed = sorted_indexed[:max_findings]
-
+    selected_indexed = sorted_indexed[:max_findings]
     selected_indexes = {index for index, _ in selected_indexed}
     selected = [finding for _, finding in selected_indexed]
     dropped = [finding for index, finding in sorted_indexed if index not in selected_indexes]
