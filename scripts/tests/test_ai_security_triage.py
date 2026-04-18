@@ -91,7 +91,7 @@ def test_ai_security_triage_downgrades_non_docker_and_filters_handoff(
     assert "needs_human" in report
 
 
-def test_ai_security_triage_blocks_exit(tmp_path, monkeypatch, sample_security_findings):
+def test_ai_security_triage_block_exits_zero(tmp_path, monkeypatch, sample_security_findings):
     findings_path = tmp_path / "findings.json"
     report_path = tmp_path / "report.md"
     handoff_path = tmp_path / "handoff.json"
@@ -107,16 +107,16 @@ def test_ai_security_triage_blocks_exit(tmp_path, monkeypatch, sample_security_f
         },
     )
 
-    with pytest.raises(SystemExit, match="1"):
-        run_main(
-            [
-                "--findings",
-                str(findings_path),
-                "--report",
-                str(report_path),
-                "--handoff",
-                str(handoff_path),
-            ]
-        )
+    run_main(
+        [
+            "--findings",
+            str(findings_path),
+            "--report",
+            str(report_path),
+            "--handoff",
+            str(handoff_path),
+        ]
+    )
 
     assert report_path.exists()
+    assert "block" in report_path.read_text().lower()

@@ -1,3 +1,4 @@
+# Stage 4.2 uses stdlib-only payload budgeting and retry logic; no new deps required.
 requests==2.32.3
 PyYAML==6.0.2
 pytest==8.3.3

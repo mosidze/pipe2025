@@ -60,11 +60,27 @@ Set these four in Settings → Secrets and variables → Actions before the firs
 - `AI_BASE_URL` — e.g. `https://api.groq.com/openai/v1`.
 - `AI_MODEL` — e.g. `llama-3.3-70b-versatile` (Groq's active 70B model; `llama-3.1-70b-versatile` was decommissioned in October 2025).
 
+Payload budget: `ai-triage` trims findings to the top 40 by severity before the model call, preferring docker-scoped findings. If the payload is still too large, it chunks the request into 20-item batches. On persistent rate limits, the job reports the findings without AI commentary and exits `0` because the six scanners are deterministic and the AI layer is additive.
+
 ## Operator controls
 
 - Setting repo variable `AUTOHEAL_DISABLED=true` skips the autoheal job while `diagnose` still runs.
 - Heal history lives in `artifacts/heal_history/` inside each autoheal PR diff.
 - Token usage is recorded in `artifacts/ai_usage.jsonl`.
+
+### Human-in-the-loop gate (one-time fork setup)
+
+The `trigger-autoheal` job uses a dynamic environment based on the AI gate:
+
+- `gate=allow` / `gate=warn` → environment `autoheal-auto` (auto-proceeds).
+- `gate=block` → environment `autoheal-human` (waits for a reviewer click in the Actions UI: "Review deployments" → Approve).
+
+Create both in Settings → Environments on your fork:
+
+- `autoheal-auto` — no protection rules.
+- `autoheal-human` — add yourself as a Required reviewer.
+
+Until the environments exist the job will pause; add them once and the flow works for every run.
 
 ## Reviewing an autoheal PR
 

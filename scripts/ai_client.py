@@ -15,6 +15,16 @@ import requests
 
 
 ROOT_ENV_PATH = Path(".env")
+RETRYABLE_STATUS_CODES = {413, 429}
+RETRY_DELAYS = (2, 4, 8)
+
+
+class PayloadTooLargeError(requests.HTTPError):
+    """Raised when the upstream AI gateway rejects the payload as too large."""
+
+
+class RateLimitError(requests.HTTPError):
+    """Raised when the upstream AI gateway rate-limits all retry attempts."""
 
 
 def load_dotenv(path: Path = ROOT_ENV_PATH) -> None:
@@ -58,7 +68,40 @@ def get_ai_config() -> dict:
     }
 
 
-def call_ai_json_with_metadata(system_prompt: str, user_prompt: str) -> dict:
+def _raise_retry_error(error: requests.HTTPError, statuses: list[int]) -> None:
+    status_set = set(statuses)
+    if status_set == {413}:
+        raise PayloadTooLargeError(str(error), response=error.response) from error
+    if status_set == {429}:
+        raise RateLimitError(str(error), response=error.response) from error
+    raise error
+
+
+def _post_with_retry(url: str, headers: dict, payload: dict) -> requests.Response:
+    last_error = None
+    statuses = []
+    for attempt in range(3):
+        response = requests.post(url, headers=headers, json=payload, timeout=120)
+        try:
+            response.raise_for_status()
+            return response
+        except requests.HTTPError as error:
+            status_code = int(response.status_code)
+            if status_code not in RETRYABLE_STATUS_CODES:
+                raise
+
+            last_error = error
+            statuses.append(status_code)
+            if attempt == 2:
+                break
+            time.sleep(RETRY_DELAYS[attempt])
+
+    if last_error is None:  # pragma: no cover - defensive
+        raise RuntimeError("AI request failed without an HTTP error.")
+    _raise_retry_error(last_error, statuses)
+
+
+def call_ai_json_with_metadata(system_prompt: str, user_prompt: str, max_tokens: int = 2048) -> dict:
     config = get_ai_config()
     headers = {
         "Authorization": f"Bearer {config['api_key']}",
@@ -71,27 +114,23 @@ def call_ai_json_with_metadata(system_prompt: str, user_prompt: str) -> dict:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
+        "max_tokens": max_tokens,
     }
 
     started_at = time.perf_counter()
-    response = requests.post(
-        f"{config['base_url']}/chat/completions",
-        headers=headers,
-        json={**payload, "response_format": {"type": "json_object"}},
-        timeout=120,
-    )
-
-    if response.status_code >= 400:
-        fallback = requests.post(
-            f"{config['base_url']}/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=120,
+    url = f"{config['base_url']}/chat/completions"
+    response = None
+    try:
+        response = _post_with_retry(
+            url,
+            headers,
+            {**payload, "response_format": {"type": "json_object"}},
         )
-        fallback.raise_for_status()
-        response = fallback
-    else:
-        response.raise_for_status()
+    except requests.HTTPError as error:
+        status_code = int(getattr(error.response, "status_code", 0) or 0)
+        if status_code not in {400, 404, 415, 422}:
+            raise
+        response = _post_with_retry(url, headers, payload)
 
     response_payload = response.json()
     content = response_payload["choices"][0]["message"]["content"]
