@@ -265,35 +265,58 @@ def merge_security_handoff(issues: list, handoff_path: Path) -> None:
     if not isinstance(targeted_findings, list):
         return
 
-    for finding in targeted_findings:
-        if not isinstance(finding, dict):
-            continue
-        if finding.get("path_scope") != "docker":
-            continue
+    docker_findings = [
+        finding
+        for finding in targeted_findings
+        if isinstance(finding, dict) and finding.get("path_scope") == "docker"
+    ]
+    if not docker_findings:
+        return
 
+    # Collapse many CVEs into one consolidated issue so the remediation-plan
+    # prompt stays small. The planner only needs a directive (bump base image)
+    # plus representative examples, not 40 individual CVE descriptions.
+    by_scanner: dict[str, int] = {}
+    by_severity: dict[str, int] = {}
+    for finding in docker_findings:
         scanner = str(finding.get("scanner", "unknown"))
-        rule_id = str(finding.get("rule_id", "unknown"))
-        title = str(finding.get("recommended_fix") or finding.get("explanation") or rule_id)
-        add_issue(
-            issues,
-            f"security:{scanner}:{rule_id}",
-            "high",
-            str(finding.get("location", "security_scan")),
-            title,
-            json.dumps(
-                {
-                    "scanner": scanner,
-                    "rule_id": rule_id,
-                    "severity": finding.get("severity", ""),
-                    "path_scope": finding.get("path_scope", ""),
-                    "explanation": finding.get("explanation", ""),
-                    "recommended_fix": finding.get("recommended_fix", ""),
-                },
-                indent=2,
-            ),
-            str(finding.get("recommended_fix") or finding.get("explanation") or "Review security scan finding."),
-            source="security_scan",
-        )
+        severity = str(finding.get("severity", "UNKNOWN")).upper()
+        by_scanner[scanner] = by_scanner.get(scanner, 0) + 1
+        by_severity[severity] = by_severity.get(severity, 0) + 1
+
+    sample = docker_findings[:5]
+    sample_lines = [
+        f"- {str(f.get('scanner', '')):12} {str(f.get('rule_id', '')):20} "
+        f"{str(f.get('severity', '')):8} :: "
+        f"{str(f.get('recommended_fix') or f.get('explanation') or '')[:120]}"
+        for f in sample
+    ]
+    evidence = "\n".join(
+        [
+            f"Total docker-scope findings: {len(docker_findings)}",
+            f"By scanner: {by_scanner}",
+            f"By severity: {by_severity}",
+            "Sample (first 5):",
+            *sample_lines,
+        ]
+    )
+
+    summary_gate = str(payload.get("gate") or "").lower() or "warn"
+    suggestion = (
+        "Container image has multiple HIGH/CRITICAL CVEs reported by the scanners. "
+        "Remediate by updating the Dockerfile base image and/or pinning package "
+        "versions; do not modify Go source code."
+    )
+    add_issue(
+        issues,
+        "security:docker:consolidated",
+        "high" if summary_gate == "block" else "medium",
+        "Dockerfile",
+        "Container image exposes multiple docker-scope vulnerabilities",
+        evidence,
+        suggestion,
+        source="security_scan",
+    )
 
 
 def main() -> None:
