@@ -120,6 +120,22 @@ def build_system_prompt() -> str:
     return f"""
 You are a GitHub-native DevSecOps triage agent.
 {__doc__.strip()}
+
+Triage policy:
+- For docker-scoped findings (trivy-image CVEs on base images, hadolint rules,
+  Dockerfile/compose misconfigurations) DEFAULT to `auto_fix` when the remediation
+  is a Dockerfile or docker-compose.yml change (base-image version bump, adding
+  USER, HEALTHCHECK, pinning digests). These are exactly what the autoheal bridge
+  is designed to remediate — do NOT default to `needs_human` just because severity
+  is HIGH or there are many findings.
+- Use `needs_human` only for: go-code findings, gitleaks secrets, license issues,
+  or docker findings where the fix requires business judgment (e.g. removing a
+  capability the app may still need).
+- Use `ignore` only for clear false positives.
+- Set `autoheal_handoff.eligible: true` whenever `triaged_findings` contains at
+  least one docker-scoped auto_fix entry, and populate `targeted_findings` with
+  every such entry (not just a subset).
+
 Return strict JSON with this schema:
 {{
   "gate": "allow|warn|block",
